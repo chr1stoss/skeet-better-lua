@@ -4452,9 +4452,7 @@ local function content_on_shot_aa(m, x, y, cw, dt, jc)
         cy = cy + 2
 
         if opts[1] then
-            render.text(ix, cy, "Yaw", {225, 225, 225, 255})
-            cy = cy + 18
-            cy = draw_combo(m, ix, cy, "Direction", "osaa_yaw",
+            cy = draw_combo(m, ix, cy, "Yaw Direction", "osaa_yaw",
                 {"Off", "Left", "Right", "Back", "Custom"}, jc, iw)
             if state.osaa_yaw == 5 then
                 cy = draw_slider(m, ix, cy, "Yaw angle", "osaa_yaw_custom", -180, 180, dt,
@@ -4464,9 +4462,7 @@ local function content_on_shot_aa(m, x, y, cw, dt, jc)
         end
 
         if opts[2] then
-            render.text(ix, cy, "Pitch", {225, 225, 225, 255})
-            cy = cy + 18
-            cy = draw_combo(m, ix, cy, "Direction", "osaa_pitch",
+            cy = draw_combo(m, ix, cy, "Pitch Direction", "osaa_pitch",
                 {"Off", "Camera", "Up", "Down", "Custom"}, jc, iw)
             if state.osaa_pitch == 5 then
                 cy = draw_slider(m, ix, cy, "Pitch angle", "osaa_pitch_custom", -89, 89, dt,
@@ -4476,9 +4472,7 @@ local function content_on_shot_aa(m, x, y, cw, dt, jc)
         end
 
         if opts[3] then
-            render.text(ix, cy, "AA-type", {225, 225, 225, 255})
-            cy = cy + 18
-            cy = draw_combo(m, ix, cy, "Type", "osaa_type", {"Spin", "Jitter"}, jc, iw)
+            cy = draw_combo(m, ix, cy, "AA-Type", "osaa_type", {"Spin", "Jitter"}, jc, iw)
             if state.osaa_type == 1 then
                 cy = draw_combo(m, ix, cy, "Around", "osaa_spin_dir", {"Left", "Right"}, jc, iw)
                 cy = draw_slider(m, ix, cy, "Speed", "osaa_spin_speed", 0, 180, dt, nil, iw)
