@@ -16,6 +16,8 @@ build-folder/
     ├── chr1stoss.lua.json          # script config
     ├── native/
     │   └── namechanger.dll         # required dll for name changer func
+    ├── preferences/
+    │   └── menu.cfg		    # cheat ui config (for better visual)
     └── skeetles/                   # required icons for better visual & author info
         ├── icon_ragebot.png
         ├── icon_antiaim.png
@@ -46,8 +48,9 @@ i.e. `C:\Users\<user>\AppData\Local\skeet\`.
 2. Copy `chr1stoss.lua` into it.
 3. Create subfolder `native\` and place `namechanger.dll` inside.
 4. Create subfolder `skeetles\` and place all PNG icons inside.
-5. Launch CS2 through the loader. `chr1stoss.lua` is picked up automatically.
-6. `chr1stoss.lua.json` is created next to the script on the first settings change.
+5. Create subfolder `preferences\` and place `menu.cfg` inside.
+6. Launch CS2 through the loader. `chr1stoss.lua` is picked up automatically.
+7. `chr1stoss.lua.json` is created next to the script on the first settings change.
 
 **Required minimum:** `chr1stoss.lua`. Without `native\namechanger.dll` the NameChanger section displays `DLL not found` and is inert. Without `skeetles\` the tab icons fall back to plain circles.
 
@@ -59,6 +62,7 @@ i.e. `C:\Users\<user>\AppData\Local\skeet\`.
 |---|---|---|
 | `chr1stoss.lua` | yes | Main script                                                                   |
 | `native/namechanger.dll` | for NameChanger | x64, VC++ runtime                                                             |
+| `preferences/menu.cfg` | for better .lua and cheat visual sync | Generated, do not edit manually |
 | `skeetles/*.png` | recommended | 9 icons, any size (rendered at 512x512 / 256×256 / 128×128 depending on slot) |
 | `chr1stoss.lua.json` | auto | Generated, do not edit manually                                               |
 | Lua loader with `render`, `imgui`, `ffi`, `storage`, `entity`, `combat`, `cmd`, `engine`, `cvar`, `trace`, `client`, `ui`, `utils`, `events` APIs | yes | skeet loader                                                                  |
@@ -71,8 +75,8 @@ i.e. `C:\Users\<user>\AppData\Local\skeet\`.
 
 | Tab | Contents |
 |---|---|
-| **RAGEBOT** | Autowall (truth / visual), Knife & Zeus Bot (visual placeholder) |
-| **ANTI AIM** | Per-state (stand / crouch / move / air): enable, at-target, yaw, pitch, spin, jitter |
+| **RAGEBOT** | Autowall (truth / visual), OSAA (On-Shot Anti-Aim): **local shot** and **from enemy shot** |
+| **ANTI AIM** | Per-state (stand / crouch / move / air): enable, at-target, yaw, pitch, spin, jitter. Unique for Air: only space on hold, space threshold, air-duck |
 | **CROSSHAIR** | Crosshair, DoubleTap Indicator |
 | **VISUALS** | Backtrack, Enemy Arrows, Player Trail, Menu Background, Watermark |
 | **MISCELLANEOUS** | Autobuy, Messages (Chat Spammer + TrashTalk), Name Changer |
@@ -132,7 +136,7 @@ i.e. `C:\Users\<user>\AppData\Local\skeet\`.
 **Shared modifiers (applied to every selected tag):**
 
 - **Tag Wrapper** — `Square []`, `Curly {}`, `Angle <>`, `Equals = =`
-- **Tag Animation** — `Typing` (with cursor `|`, `/`, `\`, `_`), `Jitter`, `Sliding`
+- **Tag Animation** — `Typing` (with cursor `|`, `/`, `\`, `_`), `Jitter`, `Sliding`, `Selector`
 - **Tag Position** — `Before` nickname / `After` nickname
 - **Tag Speed** — animation speed
 
@@ -168,7 +172,7 @@ Log output (if enabled) goes to the loader log file, not the CS2 console. Look f
 
 ### Notes
 
-- Knife & Zeus Bot is a static visual placeholder. Controls are rendered but cannot be toggled or changed. Nothing executes.
+- OSAA (enemy) may run slowly because it is tracking `weapon_fire` against opponents and subsequent `bullet_impact` (heuristic). Full avoidance of damage is not guaranteed.
 - Anti-Aim suppresses all native anti-aim modifiers (settings.list("anti aim") filtered) and overrides `rotation`, `pitch mode`, `custom pitch` per tick. On release (`anti aim` disabled or player dead), all overrides are cleared.
 - Awall uses `combat.hitboxes` + `combat.damage` for the last tick only. Visual square position is smoothed with `1 - exp(-smooth * 20 * dt)`.
 - Watermark reads FPS from `client.frametime`, jitter from a rolling stddev of 30 samples, speed from `local_player.velocity` (2D magnitude), map from `client.map_name`, time from `kernel32.GetLocalTime`.
@@ -179,4 +183,4 @@ Log output (if enabled) goes to the loader log file, not the CS2 console. Look f
 
 ### Version
 
-Current build: `1.3.3.7`, channel `stable`, `2026-11-13`
+Current build: `1.3.3.7`, channel `stable`, `2026-11-23`

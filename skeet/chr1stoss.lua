@@ -2,14 +2,6 @@
 local CONFIG_KEY = "state"
 local DLL_PATH   = "native/namechanger.dll"
 
-local function log(msg)
-    msg = "[chr1stoss] " .. tostring(msg)
-    if type(print) == "function" then print(msg) end
-    if console and type(console.exec) == "function" then
-        console.exec('echo "' .. msg:gsub('"', "'") .. '"')
-    end
-end
-
 local _pcall
 do
     local _raw = rawget(_G, "pcall")
@@ -69,7 +61,7 @@ local tab_icons = {nil, nil, nil, nil, nil, nil, nil}
 local icons_loaded = false
 
 local scroll = {
-    awall = 0, v_ragebot_kb = 0,
+    awall = 0, v_ragebot_osaa = 0,
     aa_stand = 0, aa_crouch = 0, aa_move = 0, aa_air = 0,
     v_ch = 0, v_misc_dt = 0,
     v_bt = 0, v_ea = 0, v_trail = 0, v_misc_blur = 0, v_wm = 0,
@@ -78,7 +70,7 @@ local scroll = {
     author = 0, build = 0,
 }
 local last_max_scroll = {
-    awall = 0, v_ragebot_kb = 0,
+    awall = 0, v_ragebot_osaa = 0,
     aa_stand = 0, aa_crouch = 0, aa_move = 0, aa_air = 0,
     v_ch = 0, v_misc_dt = 0,
     v_bt = 0, v_ea = 0, v_trail = 0, v_misc_blur = 0, v_wm = 0,
@@ -94,7 +86,7 @@ local _clip = nil
 
 local state = {
     cb_weapons = false, cb_utility = false,
-    combo_primary = 3, combo_secondary = 1,
+    combo_primary = 3, combo_primary_schema = 2, combo_secondary = 1,
     combo_armor = 2,
     multi_utility   = {false, false, false, false, false, false},
     multi_another   = {false, false, false},
@@ -119,6 +111,7 @@ local state = {
     nc_tag_anim_enabled = false,
     nc_tag_wrap = 1,
     nc_tag_mode = 1,
+    nc_selector_wrap = 1,
     nc_tag_pos = 1, nc_tag_spd = 0.15,
     nc_cursor = 1,
 
@@ -172,6 +165,7 @@ local state = {
     aa_air_jitter_mode = 1, aa_air_jitter_degree = 30, aa_air_jitter_speed = 0.1,
     aa_air_only_space = false,
     aa_air_space_threshold = 0.5,
+    aa_air_duck = false,
 
     -- Backtrack
     bt_enabled = false, bt_mode = 1,
@@ -245,17 +239,17 @@ local state = {
 
     sv_filter = {true, true, true, true, true},
 
-    -- Knife & Zeus Bot (visual placeholder)
-    kb_knife_enabled = false,
-    kb_knife_silent  = false,
-    kb_knife_range   = 60,
-    kb_knife_fov     = 25,
-    kb_knife_delay   = 0.35,
-    kb_zeus_enabled  = false,
-    kb_zeus_silent   = false,
-    kb_zeus_range    = 190,
-    kb_zeus_fov      = 15,
-    kb_zeus_delay    = 0.5,
+    -- On-Shot Anti-Aim profile editor (stored independently from normal AA states)
+    osaa_enabled = false,
+    osaa_options = {true, false, false}, -- Yaw, Pitch, AA-type; at least one is always selected
+    osaa_offset = 0.20,
+    osaa_yaw = 1, osaa_yaw_custom = 0,
+    osaa_pitch = 1, osaa_pitch_custom = 0,
+    osaa_type = 1, -- 1=Spin, 2=Jitter
+    osaa_spin_dir = 1, osaa_spin_speed = 30,
+    osaa_jitter_mode = 1, osaa_jitter_degree = 30, osaa_jitter_speed = 0.10,
+    osaa_enemy_enabled = false,
+    osaa_enemy_offset = 0,
 
     user_collapsed = false,
 }
@@ -411,7 +405,7 @@ end
 
 local AUTHOR_INFO = {
     nick    = "chr1stoss",
-    tagline = "Developer • Skeet Multi",
+    tagline = "Developer  Skeet Multi",
     socials = {
         {key = "Discord",    url = "https://discord.com/users/chr1stxss"},
         {key = "Telegram",   url = "https://t.me/chr1stxss"},
@@ -424,7 +418,7 @@ local AUTHOR_INFO = {
 local BUILD_INFO = {
     version  = "1.3.3.7",
     channel  = "stable",
-    date     = "2026-11-13",
+    date     = "2026-11-23",
     filename = "chr1stoss.lua",
 }
 
@@ -442,6 +436,7 @@ local function load_state()
         ea_outline_color=true, ea_text_color=true,
         bt_info_col=true, dt_ind_color=true, dt_ind_screen_color=true,
     }
+    local migrate_primary = saved.combo_primary_schema == nil
     for k, v in pairs(saved) do
         if k:sub(1, 3) ~= "kb_" and state[k] ~= nil and type(state[k]) == type(v) then
             local ok = true
@@ -453,6 +448,12 @@ local function load_state()
             if ok then state[k] = v end
         end
     end
+    -- Preserve legacy AutoBuy selection: old index 4 was Negev; it is now index 7.
+    if migrate_primary and type(saved.combo_primary) == "number" and saved.combo_primary == 4 then
+        state.combo_primary = 7
+    end
+    state.combo_primary_schema = 2
+
     -- sanitize: legacy sparse nc_tag_presets (crashes storage.set)
     if type(saved.nc_tag_presets) == "table" then
         local dense = {}
@@ -464,6 +465,20 @@ local function load_state()
     end
 end
 load_state()
+
+-- OSAA's multi-combo must never be empty, including configs saved by older builds.
+do
+    local opts = state.osaa_options
+    if type(opts) ~= "table" then opts = {true, false, false} end
+    local any_selected = false
+    for i = 1, 3 do
+        opts[i] = (opts[i] == true)
+        if opts[i] then any_selected = true end
+    end
+    if not any_selected then opts[1] = true end
+    state.osaa_options = opts
+    state.osaa_enemy_offset = math.max(-89, math.min(89, tonumber(state.osaa_enemy_offset) or 0))
+end
 
 is_collapsed = state.user_collapsed
 current_w    = is_collapsed and 75 or 660
@@ -532,7 +547,10 @@ end
 events.on("shutdown", function() storage.set(CONFIG_KEY, state) end)
 
 local function api_safe(fn)
-    if api and api.protect then api.protect(fn) else fn() end
+    if api and type(api.protect) == "function" then
+        return api.protect(fn)
+    end
+    return _pcall(fn)
 end
 
 -- Chat helpers
@@ -588,10 +606,10 @@ local TT_KILL = {
         {"1", "nn", "dog"}, {"1", "1", "1"}, {"sit", "down"}, {"that's", "a", "free"}
     },
     RU = {
-        "ez", "1nndog", "1", "найс аа еблан", "лучший ресолвер", "ной в хуй", "1kiddo", "учись играть",
-        "bot_kick", "nixware?", "xone?", "gamesense.pub", "у тя аа хуйни", "дальше", "free", "gg", "сядь",
-        {"твой", "резолвер", "это", "хуета"}, {"skeet", "skeet", "number 1", "cheat"}, {"1", "nn", "dog"},
-        {"1", "1", "1"}, {"падай", "в ноги", "королю"}, {"это", "было", "so free"}
+        "ez", "1nndog", "1", "  ", " ", "  ", "1kiddo", " ",
+        "bot_kick", "nixware?", "xone?", "gamesense.pub", "   ", "", "free", "gg", "",
+        {"", "", "", ""}, {"skeet", "skeet", "number 1", "cheat"}, {"1", "nn", "dog"},
+        {"1", "1", "1"}, {"", " ", ""}, {"", "", "so free"}
     }
 }
 local TT_DEATH = {
@@ -601,9 +619,9 @@ local TT_DEATH = {
         {"imagine", "dying", "to", "lucky"}, {"lag", "comp", "moment"}
     },
     RU = {
-        "лаг", "лаки", "резолвер-лаки-v1", "nl moment", "лагкомп", "десинк", "фейк", "кид", "как тебе везет ебень",
-        {"твой", "чит", "тащит", "тя"}, {"этот чел", "не понимает", "что ему просто", "повезло"},
-        {"представь", "умереть", "от", "лаки"}, {"лаг", "комп", "момент"}
+        "", "", "--v1", "nl moment", "", "", "", "", "   ",
+        {"", "", "", ""}, {" ", " ", "  ", ""},
+        {"", "", "", ""}, {"", "", ""}
     }
 }
 local TT_PART_DELAY = 0.35
@@ -801,6 +819,9 @@ local function do_buy()
     local cmds = {}
     local prim = state.combo_primary
     if prim == 3 then cmds[#cmds+1] = "buy ssg08"
+    elseif prim == 4 then cmds[#cmds+1] = "buy ak47"
+    elseif prim == 5 then cmds[#cmds+1] = "buy m4a1_silencer"
+    elseif prim == 6 then cmds[#cmds+1] = "buy m4a1"
     elseif prim == 2 then cmds[#cmds+1] = "buy awp"
     elseif prim == 1 then
         local me = entity.local_player()
@@ -808,7 +829,7 @@ local function do_buy()
             if me.team == 2 then cmds[#cmds+1] = "buy g3sg1"
             elseif me.team == 3 then cmds[#cmds+1] = "buy scar20" end
         end
-    elseif prim == 4 then cmds[#cmds+1] = "buy negev" end
+    elseif prim == 7 then cmds[#cmds+1] = "buy negev" end
     if state.combo_secondary == 1 then cmds[#cmds+1] = "buy revolver"
     elseif state.combo_secondary == 2 then cmds[#cmds+1] = "buy deagle" end
     local armor = state.combo_armor or 1
@@ -1056,7 +1077,7 @@ local function nc_init()
     end
 
     -- 6g. last resort
-    add("native/namechanger.dll")
+    add(DLL_PATH)
     add("namechanger.dll")
 
     -- GetFileAttributesA (fast stat, no DLL loading)
@@ -1073,14 +1094,12 @@ local function nc_init()
             attrs = tonumber(a) or INVALID_ATTRS
         end)
 
-        if attrs == INVALID_ATTRS or attrs == 4294967295 then
-        else
+        if attrs ~= INVALID_ATTRS and attrs ~= 4294967295 then
             _pcall(k32.LoadLibraryA, path)
             local lok, l = _pcall(ffi_mod.load, path)
             if lok and l then
                 lib = l
                 break
-            else
             end
         end
     end
@@ -1091,7 +1110,7 @@ local function nc_init()
     end
 
     -- 8. init
-    local init_ok, init_ret = _pcall(lib.nc_init)
+    local init_ok = _pcall(lib.nc_init)
     if not init_ok then
         NC_STATUS = "dll_init_failed"
         return
@@ -1104,15 +1123,18 @@ local function nc_init()
         buf_empty = ffi_mod.new("char[1]", ""),
         buf_sep   = ffi_mod.new("char[2]", " "),
         cached_base = nil, cached_frames = nil, cached_mode = nil,
-        cached_wrap = nil, cached_cursor = nil,
+        cached_wrap = nil, cached_cursor = nil, cached_selector = nil,
         last_combined = nil, last_ui_poll = 0,
         cached_ui = { nc_on = false, last_n = "", last_t = "", last_pos = 1, nc_cursor = 1 },
         alive = true,
     }
     NC_STATUS = "ok"
 end
-_pcall(nc_init)
-api_safe(nc_init)
+-- Initialize the native module once, protected by both the API guard and _pcall.
+api_safe(function() _pcall(nc_init) end)
+
+-- On-Shot Anti-Aim settings are edited in the Ragebot panel.
+-- This UI-only profile is kept separate from the live Stand/Crouch/Move/Air AA logic.
 
 local LOOKALIKE = {
     e="3", i="1", s={"$", "5"}, g="9", a="@", o="0", t="7", l="|", b="8", z="2",
@@ -1176,6 +1198,33 @@ local function nc_slide(t, w)
     return f
 end
 
+-- Selector:      -,   .
+local function nc_selector(t, selector_idx)
+    local wrappers = {
+        {"[", "]"}, {"{", "}"}, {"|", "|"}, {"<", ">"},
+    }
+    local pair = wrappers[selector_idx or 1] or wrappers[1]
+    local chars = {}
+    --  UTF-8  ,     .
+    for ch in t:gmatch("[%z\1-\127\194-\244][\128-\191]*") do
+        chars[#chars + 1] = ch
+    end
+    if #chars == 0 then return {""} end
+    local frames = {}
+    for i = 1, #chars do
+        local frame = {}
+        for j = 1, #chars do
+            if i == j then
+                frame[#frame + 1] = pair[1] .. chars[j] .. pair[2]
+            else
+                frame[#frame + 1] = chars[j]
+            end
+        end
+        frames[#frames + 1] = table.concat(frame)
+    end
+    return frames
+end
+
 local function nc_sync(now)
     if not nc_data or not nc_data.alive then return end
     local cu, lib = nc_data.cached_ui, nc_data.lib
@@ -1212,7 +1261,9 @@ local function nc_sync(now)
     end
     if n == "" then n = " " end
     local t = ""
-    local wrap = cu.tag_wrap_enabled and (cu.tag_wrap or 1) or 0
+    local mode = cu.tag_anim_enabled and (cu.tag_mode or 1) or 0
+    local selector_wrap = cu.selector_wrap or 1
+    local wrap = (mode == 4) and 0 or (cu.tag_wrap_enabled and (cu.tag_wrap or 1) or 0)
     local cursor = cu.nc_cursor or 1
     if cu.tag_on then
         local base = ""
@@ -1253,26 +1304,48 @@ local function nc_sync(now)
             base = cu.tag_txt or ""
         end
 
-        local mode = cu.tag_anim_enabled and (cu.tag_mode or 1) or 0
         if base ~= "" then
             if nc_data.cached_base ~= base or nc_data.cached_mode ~= mode
-               or nc_data.cached_wrap ~= wrap or nc_data.cached_cursor ~= cursor then
-                nc_data.cached_base, nc_data.cached_mode, nc_data.cached_wrap, nc_data.cached_cursor
-                    = base, mode, wrap, cursor
+               or nc_data.cached_wrap ~= wrap or nc_data.cached_cursor ~= cursor
+               or nc_data.cached_selector ~= selector_wrap then
+                nc_data.cached_base, nc_data.cached_mode, nc_data.cached_wrap, nc_data.cached_cursor,
+                    nc_data.cached_selector = base, mode, wrap, cursor, selector_wrap
                 if mode == 1 then nc_data.cached_frames = nc_typing(base, wrap, cursor)
                 elseif mode == 2 then nc_data.cached_frames = nc_jitter(base, wrap)
                 elseif mode == 3 then nc_data.cached_frames = nc_slide(base, wrap)
+                elseif mode == 4 then
+                    nc_data.cached_frames = nc_selector(base, selector_wrap)
+                    -- Selector       .
+                    --        
+                    --    nc_set   .
+                    nc_data.selector_index = 1
+                    nc_data.selector_last_sent = nil
                 else nc_data.cached_frames = {nc_wrap(base, wrap)} end
             end
-            if mode >= 1 and #base >= 2 then
-                local sp = math.max(0.01, cu.tag_speed * 0.3)
+            if mode == 4 and #nc_data.cached_frames > 1 then
+                --      :  
+                --     nc_set.   /
+                --   ,     .
+                local sp = math.max(0.01, (cu.tag_speed or 0.15) * 0.3)
+                nc_data.selector_index = nc_data.selector_index or 1
+                if nc_data.selector_last_sent
+                   and now - nc_data.selector_last_sent >= sp then
+                    nc_data.selector_index = (nc_data.selector_index % #nc_data.cached_frames) + 1
+                    nc_data.selector_last_sent = nil
+                end
+                t = nc_data.cached_frames[nc_data.selector_index]
+            elseif mode >= 1 and #nc_data.cached_frames > 1 then
+                local sp = math.max(0.01, (cu.tag_speed or 0.15) * 0.3)
                 t = nc_data.cached_frames[math.floor(now / sp) % #nc_data.cached_frames + 1]
             else
                 t = nc_data.cached_frames[1]
             end
         end
     end
-    if n ~= cu.last_n or t ~= cu.last_t or cu.tag_pos ~= cu.last_pos then
+    --       .
+    --      cached_ui: nc_set  ,
+    --          paint.
+    do
         cu.last_n, cu.last_t, cu.last_pos = n, t, cu.tag_pos
         local comb = n
         if t ~= "" then
@@ -1283,29 +1356,31 @@ local function nc_sync(now)
             lib.nc_set_clantag(nc_data.buf_empty, nc_data.buf_sep)
             nc_data.ffi.copy(nc_data.buf_nick, comb)
             nc_data.buf_nick[#comb] = 0
-            if lib.nc_set(nc_data.buf_nick) == 0 then nc_data.last_combined = comb end
+            if lib.nc_set(nc_data.buf_nick) == 0 then
+                nc_data.last_combined = comb
+                --       .
+                if mode == 4 and t ~= "" then
+                    nc_data.selector_last_sent = now
+                end
+            end
         end
     end
 end
 
-local nc_sanitize_nick
-do
-    function nc_sanitize_nick(s)
-        s = tostring(s or ""):gsub('[%c"\\;]', "")
-        if #s > 64 then s = s:sub(1, 64) end
-        return s
-    end
+local function nc_sanitize_nick(s)
+    s = tostring(s or ""):gsub('[%c"\\;]', "")
+    if #s > 64 then s = s:sub(1, 64) end
+    return s
 end
 
--- Кеш реального controller ID локального игрока
+--   controller ID  
 local nc_local_real_id = nil
-local nc_local_id_last_poll = 0
 
 local function nc_find_local_real_id(players)
     local me = entity.local_player()
     if not me then return nil end
 
-    -- Быстрый путь: кеш ещё валиден?
+    --  :   ?
     if nc_local_real_id then
         for _, pl in ipairs(players) do
             if pl.id == nc_local_real_id then return nc_local_real_id end
@@ -1313,13 +1388,13 @@ local function nc_find_local_real_id(players)
         nc_local_real_id = nil
     end
 
-    -- Прямой ID, если API вдруг отдал не 0
+    --  ID,  API    0
     if me.id and me.id ~= 0 then
         nc_local_real_id = me.id
         return me.id
     end
 
-    -- Основной путь: match по origin (не анимируется)
+    --  : match  origin ( )
     if me.origin and me.origin.x then
         local best_pl, best_d2 = nil, math.huge
         for _, pl in ipairs(players) do
@@ -1339,7 +1414,7 @@ local function nc_find_local_real_id(players)
         end
     end
 
-    -- Fallback: точное совпадение ника (сработает, если анимация паузует)
+    -- Fallback:    (,   )
     if me.name then
         for _, pl in ipairs(players) do
             if pl.name == me.name then
@@ -1402,6 +1477,7 @@ local function nc_tick_paint()
             cu.swap_delay = state.nc_swap_delay or 1.0
             cu.tag_wrap_enabled = state.nc_tag_wrap_enabled == true
             cu.tag_anim_enabled = state.nc_tag_anim_enabled == true
+            cu.selector_wrap = state.nc_selector_wrap or 1
             local pfx = {}
             for i = 1, #NC_TAG_PRESETS do
                 pfx[i] = state["nc_pfx_" .. i] or 1
@@ -1429,12 +1505,12 @@ end)
 
 -- ANTI-AIM
 local aa_rt = {
-    spin_angle     = { aa_stand=0, aa_crouch=0, aa_move=0, aa_air=0 },
-    spin_last      = { aa_stand=0, aa_crouch=0, aa_move=0, aa_air=0 },
-    jit_phase      = { aa_stand=false, aa_crouch=false, aa_move=false, aa_air=false },
-    jit_last       = { aa_stand=0, aa_crouch=0, aa_move=0, aa_air=0 },
-    jit_rand       = { aa_stand=0, aa_crouch=0, aa_move=0, aa_air=0 },
-    jit_idx        = { aa_stand=0, aa_crouch=0, aa_move=0, aa_air=0 },
+    spin_angle     = { aa_stand=0, aa_crouch=0, aa_move=0, aa_air=0, osaa=0 },
+    spin_last      = { aa_stand=0, aa_crouch=0, aa_move=0, aa_air=0, osaa=0 },
+    jit_phase      = { aa_stand=false, aa_crouch=false, aa_move=false, aa_air=false, osaa=false },
+    jit_last       = { aa_stand=0, aa_crouch=0, aa_move=0, aa_air=0, osaa=0 },
+    jit_rand       = { aa_stand=0, aa_crouch=0, aa_move=0, aa_air=0, osaa=0 },
+    jit_idx        = { aa_stand=0, aa_crouch=0, aa_move=0, aa_air=0, osaa=0 },
     flick_yaw_last = { aa_stand=0, aa_crouch=0, aa_move=0, aa_air=0 },
     flick_yaw_val  = { aa_stand=0, aa_crouch=0, aa_move=0, aa_air=0 },
     flick_yaw_active = { aa_stand=false, aa_crouch=false, aa_move=false, aa_air=false },
@@ -1513,16 +1589,251 @@ local function aa_get_state(me)
     return "aa_stand"
 end
 
+-- OSAA is armed by the local weapon_fire event. The normal AA profile remains
+-- the fallback; only the options selected in osaa_options are temporarily replaced.
+aa_rt.osaa_until = 0
+aa_rt.osaa_enemy_until = 0
+aa_rt.osaa_enemy_shots = {}
+aa_rt.osaa_enemy_impacts = {}
+
+local function aa_vec_copy(v)
+    if not v then return nil end
+    local x, y, z = tonumber(v.x), tonumber(v.y), tonumber(v.z)
+    if not x or not y or not z then return nil end
+    return { x = x, y = y, z = z }
+end
+
+-- Minimum distance between two finite 3D segments. The second segment is the
+-- local head hitbox capsule axis; the first is the enemy bullet's observed path.
+local function aa_segment_distance(a0, a1, b0, b1)
+    local ux, uy, uz = a1.x-a0.x, a1.y-a0.y, a1.z-a0.z
+    local vx, vy, vz = b1.x-b0.x, b1.y-b0.y, b1.z-b0.z
+    local wx, wy, wz = a0.x-b0.x, a0.y-b0.y, a0.z-b0.z
+    local aa = ux*ux + uy*uy + uz*uz
+    local bb = ux*vx + uy*vy + uz*vz
+    local cc = vx*vx + vy*vy + vz*vz
+    local dd = ux*wx + uy*wy + uz*wz
+    local ee = vx*wx + vy*wy + vz*wz
+    local denom = aa*cc - bb*bb
+    local sn, sd, tn, td
+
+    if aa < 1e-8 then
+        if cc < 1e-8 then
+            local dx, dy, dz = a0.x-b0.x, a0.y-b0.y, a0.z-b0.z
+            return math.sqrt(dx*dx + dy*dy + dz*dz)
+        end
+        local t = math.max(0, math.min(1, ee / cc))
+        local dx, dy, dz = a0.x-(b0.x+t*vx), a0.y-(b0.y+t*vy), a0.z-(b0.z+t*vz)
+        return math.sqrt(dx*dx + dy*dy + dz*dz)
+    elseif cc < 1e-8 then
+        local t = math.max(0, math.min(1, -dd / aa))
+        local dx, dy, dz = (a0.x+t*ux)-b0.x, (a0.y+t*uy)-b0.y, (a0.z+t*uz)-b0.z
+        return math.sqrt(dx*dx + dy*dy + dz*dz)
+    else
+        if denom < 1e-8 then
+            sn, sd, tn, td = 0, 1, ee, cc
+        else
+            sn, sd = bb*ee-cc*dd, denom
+            tn, td = aa*ee-bb*dd, denom
+        end
+        if sn < 0 then
+            sn = 0
+            tn, td = ee, cc
+        elseif sn > sd then
+            sn = sd
+            tn, td = ee+bb, cc
+        end
+    end
+
+    if tn < 0 then
+        tn = 0
+        if -dd < 0 then sn = 0
+        elseif -dd > aa then sn = sd
+        else sn, sd = -dd, aa end
+    elseif tn > td then
+        tn = td
+        local v = -dd + bb
+        if v < 0 then sn = 0
+        elseif v > aa then sn = sd
+        else sn, sd = v, aa end
+    end
+
+    local sc = math.abs(sn) < 1e-8 and 0 or sn / math.max(sd, 1e-8)
+    local tc = math.abs(tn) < 1e-8 and 0 or tn / math.max(td, 1e-8)
+    local dx = wx + sc*ux - tc*vx
+    local dy = wy + sc*uy - tc*vy
+    local dz = wz + sc*uz - tc*vz
+    return math.sqrt(dx*dx + dy*dy + dz*dz)
+end
+
+local function aa_top_hitbox(player_id)
+    local ok, geo = _pcall(combat.hitboxes, player_id)
+    if not ok or type(geo) ~= "table" or type(geo.hitboxes) ~= "table" then return nil end
+    local best, best_z = nil, -math.huge
+    for _, hb in ipairs(geo.hitboxes) do
+        local center = aa_vec_copy(hb.center)
+        if center and center.z > best_z then
+            best, best_z = hb, center.z
+        end
+    end
+    return best
+end
+
+local function aa_osaa_enemy_check(me, now)
+    if not state.osaa_enemy_enabled then
+        aa_rt.osaa_enemy_until = 0
+        aa_rt.osaa_enemy_shots = {}
+        aa_rt.osaa_enemy_impacts = {}
+        return false
+    end
+
+    for id, shots in pairs(aa_rt.osaa_enemy_shots) do
+        local kept = {}
+        for i = 1, #shots do
+            if now - shots[i] <= 0.55 then kept[#kept+1] = shots[i] end
+        end
+        if #kept > 0 then aa_rt.osaa_enemy_shots[id] = kept
+        else aa_rt.osaa_enemy_shots[id] = nil end
+    end
+
+    local impacts = aa_rt.osaa_enemy_impacts
+    if #impacts == 0 then return now < (aa_rt.osaa_enemy_until or 0) end
+
+    local local_head = aa_top_hitbox(0)
+    local head_a, head_b, head_radius
+    if local_head then
+        head_a = aa_vec_copy(local_head.capsule_a) or aa_vec_copy(local_head.center)
+        head_b = aa_vec_copy(local_head.capsule_b) or aa_vec_copy(local_head.center)
+        head_radius = tonumber(local_head.radius) or 0
+    end
+    if not head_a or not head_b then
+        local zoff = ((me.flags or 0) & 2) ~= 0 and 46 or 64
+        head_a = { x=me.origin.x, y=me.origin.y, z=me.origin.z+zoff }
+        head_b = { x=head_a.x, y=head_a.y, z=head_a.z }
+        head_radius = 4
+    end
+
+    local triggered = false
+    for _, impact in ipairs(impacts) do
+        local shots = aa_rt.osaa_enemy_shots[impact.id]
+        local shot_recent = false
+        if shots then
+            for i = #shots, 1, -1 do
+                local fired_at = shots[i]
+                if impact.time >= fired_at - 0.04 and impact.time - fired_at <= 0.45 then
+                    shot_recent = true
+                    break
+                end
+            end
+        end
+
+        if shot_recent and now - impact.time <= 0.30 then
+            local ok, enemy = _pcall(entity.get, impact.id)
+            if ok and enemy and enemy.alive and enemy.enemy and enemy.origin then
+                local enemy_head = aa_top_hitbox(impact.id)
+                local start_pos = enemy_head and aa_vec_copy(enemy_head.center) or nil
+                if not start_pos then
+                    local zoff = ((enemy.flags or 0) & 2) ~= 0 and 46 or 64
+                    start_pos = { x=enemy.origin.x, y=enemy.origin.y, z=enemy.origin.z+zoff }
+                end
+
+                local distance = aa_segment_distance(start_pos, impact.position, head_a, head_b)
+                -- Head capsule radius plus a small tolerance catches near-head shots
+                -- even when the server-side impact point is slightly offset by spread.
+                if distance <= math.max(7, head_radius + 5) then
+                    aa_rt.osaa_enemy_until = now + 0.16
+                    triggered = true
+                    break
+                end
+            end
+        end
+    end
+
+    aa_rt.osaa_enemy_impacts = {}
+    return triggered or now < (aa_rt.osaa_enemy_until or 0)
+end
+
+events.on("game_event", function(ev)
+    if not ev then return end
+    local userid = tonumber(ev.userid)
+    if not userid or userid == 0 then
+        if ev.name == "weapon_fire" and userid == 0 and state.osaa_enabled then
+            local opts = state.osaa_options or {}
+            if opts[1] or opts[2] or opts[3] then
+                local offset = tonumber(state.osaa_offset) or 0.20
+                if offset < 0.05 then offset = 0.05 elseif offset > 1.0 then offset = 1.0 end
+                aa_rt.osaa_until = client.time() + offset
+            end
+        end
+        return
+    end
+    if not state.osaa_enemy_enabled then return end
+
+    local now = client.time()
+    if ev.name == "weapon_fire" then
+        local shots = aa_rt.osaa_enemy_shots[userid] or {}
+        shots[#shots+1] = now
+        while #shots > 8 do table.remove(shots, 1) end
+        aa_rt.osaa_enemy_shots[userid] = shots
+    elseif ev.name == "bullet_impact" then
+        local position = aa_vec_copy(ev.position)
+        if position then
+            local pending = aa_rt.osaa_enemy_impacts
+            pending[#pending+1] = { id=userid, position=position, time=now }
+            while #pending > 32 do table.remove(pending, 1) end
+        end
+    end
+end)
+
 local aa_air_space_last_held = -999
+local aa_air_duck_owned = false
+local function aa_air_duck_release()
+    if aa_air_duck_owned then
+        console.exec("-duck")
+        aa_air_duck_owned = false
+    end
+end
+local function aa_key_is_down(vk)
+    if not client or type(client.key_down) ~= "function" then return false end
+    local ok, res = _pcall(client.key_down, vk)
+    return ok and (res == true or (type(res) == "number" and res > 0))
+end
 events.on("create_move", function()
     local native_on = settings.get("anti aim", "anti aim")
-    if not native_on then aa_release(); return end
+    if not native_on then aa_air_duck_release(); aa_release(); return end
     local me = entity.local_player()
-    if not me or not me.alive then aa_release(); return end
+    if not me or not me.alive then
+        aa_rt.osaa_until = 0
+        aa_rt.osaa_enemy_until = 0
+        aa_rt.osaa_enemy_shots = {}
+        aa_rt.osaa_enemy_impacts = {}
+        aa_air_duck_release(); aa_release(); return
+    end
+
+    -- Air-Duck is scoped strictly to the Air Anti-Aim profile.
+    local airborne = (me.flags & 1) == 0
+    local ctrl_held = aa_key_is_down(0x11) or aa_key_is_down(0xA2) or aa_key_is_down(0xA3)
+    if state.aa_air_duck and airborne then
+        if not ctrl_held and not aa_air_duck_owned then
+            console.exec("+duck")
+            aa_air_duck_owned = true
+        end
+    else
+        aa_air_duck_release()
+    end
     aa_suppress_modifiers()
 
     local sk = aa_get_state(me)
     local interim_stand = false
+    local now = client.time()
+    local osaa_enemy_active = aa_osaa_enemy_check(me, now)
+    local osaa_opts = state.osaa_options or {}
+    local osaa_active = state.osaa_enabled == true
+        and now < (aa_rt.osaa_until or 0)
+        and (osaa_opts[1] or osaa_opts[2] or osaa_opts[3])
+    local osaa_yaw_active = osaa_active and osaa_opts[1] == true
+    local osaa_pitch_active = osaa_active and osaa_opts[2] == true
+    local osaa_type_active = osaa_active and osaa_opts[3] == true
 
     if sk == "aa_air" and state.aa_air_only_space then
         local space_down = false
@@ -1543,7 +1854,7 @@ events.on("create_move", function()
         end
     end
 
-    if not state[sk .. "_enabled"] and not interim_stand then
+    if not state[sk .. "_enabled"] and not interim_stand and not osaa_active and not osaa_enemy_active then
         aa_neutralize_for_state()
         return
     end
@@ -1552,7 +1863,7 @@ events.on("create_move", function()
     local view_yaw = (cs and cs.angles and cs.angles.y) or 0
 
     local base_yaw = nil
-    if state[sk .. "_at_target"] and cs and cs.angles then
+    if not osaa_yaw_active and state[sk .. "_at_target"] and cs and cs.angles then
         local look = math.angle_vectors(cs.angles)
         local best_enemy, best_fov = nil, math.huge
         for _, pl in ipairs(entity.players(true)) do
@@ -1568,57 +1879,61 @@ events.on("create_move", function()
         end
     end
     if base_yaw == nil then
-        local yaw_idx = state[sk .. "_yaw"]
+        local yaw_idx = osaa_yaw_active and state.osaa_yaw or state[sk .. "_yaw"]
         if     yaw_idx == 1 then base_yaw = 0
         elseif yaw_idx == 2 then base_yaw = -90
         elseif yaw_idx == 3 then base_yaw = 90
         elseif yaw_idx == 4 then base_yaw = 0
+        elseif osaa_yaw_active then base_yaw = state.osaa_yaw_custom
         else                      base_yaw = state[sk .. "_yaw_custom"] end
     end
 
-    -- Spin / Jitter / Flick (yaw) - types: [1]=Spin, [2]=Jitter, [3]=Random Flick
-    local aa_type = state[sk .. "_aa_types"] or 1
-    local yaw_aa_on = state[sk .. "_extra_yaw_enabled"] == true
+    -- OSAA can independently replace yaw direction, pitch or the Spin/Jitter type.
+    -- Unselected axes continue using the current Stand/Crouch/Move/Air profile.
+    local aa_type = osaa_type_active and (state.osaa_type or 1) or (state[sk .. "_aa_types"] or 1)
+    local yaw_aa_on = osaa_type_active or state[sk .. "_extra_yaw_enabled"] == true
     local spin_on = yaw_aa_on and (aa_type == 1)
     local jitter_on = yaw_aa_on and (aa_type == 2)
     local flick_enabled = state[sk .. "_flick_enabled"] == true
     local flick_axes = state[sk .. "_flick_axes"] or {false, false}
-    local flick_yaw_on = flick_enabled and flick_axes[1] == true and not spin_on
-    local flick_pit_on = flick_enabled and flick_axes[2] == true
+    local flick_yaw_on = not (osaa_yaw_active or osaa_type_active)
+        and flick_enabled and flick_axes[1] == true and not spin_on
+    local flick_pit_on = not osaa_pitch_active and flick_enabled and flick_axes[2] == true
+    local type_prefix = osaa_type_active and "osaa" or sk
+    local rt_key = osaa_type_active and "osaa" or sk
 
     local off = 0
-    local now = client.time()
     if spin_on then
-        local dt_spin = now - (aa_rt.spin_last[sk] or now)
-        aa_rt.spin_last[sk] = now
+        local dt_spin = now - (aa_rt.spin_last[rt_key] or now)
+        aa_rt.spin_last[rt_key] = now
         if dt_spin > 0.5 then dt_spin = 0 end
-        local dir = state[sk .. "_spin_dir"] == 1 and -1 or 1
-        local spd = state[sk .. "_spin_speed"] * 20
-        aa_rt.spin_angle[sk] = (aa_rt.spin_angle[sk] + spd * dir * dt_spin) % 360
-        off = aa_rt.spin_angle[sk]
+        local dir = state[type_prefix .. "_spin_dir"] == 1 and -1 or 1
+        local spd = state[type_prefix .. "_spin_speed"] * 20
+        aa_rt.spin_angle[rt_key] = (aa_rt.spin_angle[rt_key] + spd * dir * dt_spin) % 360
+        off = aa_rt.spin_angle[rt_key]
     elseif jitter_on then
-        local mode = state[sk .. "_jitter_mode"]
-        local deg  = state[sk .. "_jitter_degree"]
-        local spd  = state[sk .. "_jitter_speed"]
+        local mode = state[type_prefix .. "_jitter_mode"]
+        local deg  = state[type_prefix .. "_jitter_degree"]
+        local spd  = state[type_prefix .. "_jitter_speed"]
         if mode == 3 then
-            if now - aa_rt.jit_last[sk] >= spd then
-                aa_rt.jit_last[sk] = now
-                aa_rt.jit_rand[sk] = (math.random() * 2 - 1) * deg
+            if now - aa_rt.jit_last[rt_key] >= spd then
+                aa_rt.jit_last[rt_key] = now
+                aa_rt.jit_rand[rt_key] = (math.random() * 2 - 1) * deg
             end
-            off = aa_rt.jit_rand[sk]
+            off = aa_rt.jit_rand[rt_key]
         elseif mode == 4 then
-            if now - aa_rt.jit_last[sk] >= spd then
-                aa_rt.jit_last[sk] = now
-                aa_rt.jit_idx[sk] = (aa_rt.jit_idx[sk] + 1) % 3
+            if now - aa_rt.jit_last[rt_key] >= spd then
+                aa_rt.jit_last[rt_key] = now
+                aa_rt.jit_idx[rt_key] = (aa_rt.jit_idx[rt_key] + 1) % 3
             end
-            off = ({ -deg, 0, deg })[aa_rt.jit_idx[sk] + 1]
+            off = ({ -deg, 0, deg })[aa_rt.jit_idx[rt_key] + 1]
         else
-            if now - aa_rt.jit_last[sk] >= spd then
-                aa_rt.jit_last[sk] = now
-                aa_rt.jit_phase[sk] = not aa_rt.jit_phase[sk]
+            if now - aa_rt.jit_last[rt_key] >= spd then
+                aa_rt.jit_last[rt_key] = now
+                aa_rt.jit_phase[rt_key] = not aa_rt.jit_phase[rt_key]
             end
-            if mode == 1 then off = aa_rt.jit_phase[sk] and deg or -deg
-            else off = aa_rt.jit_phase[sk] and deg or 0 end
+            if mode == 1 then off = aa_rt.jit_phase[rt_key] and deg or -deg
+            else off = aa_rt.jit_phase[rt_key] and deg or 0 end
         end
     end
 
@@ -1636,13 +1951,21 @@ events.on("create_move", function()
         end
     end
 
-    settings.override("anti aim", "rotation", math.normalize_angle(base_yaw + off + flick_yaw))
+    local base_profile_active = state[sk .. "_enabled"] == true or interim_stand
+    local enemy_yaw_offset = osaa_enemy_active and (tonumber(state.osaa_enemy_offset) or 0) or 0
+    if base_profile_active or osaa_yaw_active or osaa_type_active or osaa_enemy_active then
+        settings.override("anti aim", "rotation",
+            math.normalize_angle(base_yaw + off + flick_yaw + enemy_yaw_offset))
+    else
+        settings.override("anti aim", "rotation", nil)
+    end
 
     -- Pitch (base + flick)
     -- Pitch options: 1=Off, 2=Camera, 3=Up, 4=Down, 5=Custom
-    local pitch_idx = state[sk .. "_pitch"]
+    local pitch_idx = osaa_pitch_active and state.osaa_pitch or state[sk .. "_pitch"]
     local native_mode = AA_PITCH_MAP[pitch_idx] or 3
-    local pitch_custom = math.floor((state[sk .. "_pitch_custom"] or 0) + 0.5)
+    local pitch_custom_source = osaa_pitch_active and state.osaa_pitch_custom or state[sk .. "_pitch_custom"]
+    local pitch_custom = math.floor((pitch_custom_source or 0) + 0.5)
 
     local flick_pit = 0
     if flick_pit_on then
@@ -1672,7 +1995,10 @@ events.on("create_move", function()
         base_pitch = pitch_custom                        -- Custom
     end
 
-    if flick_pit ~= 0 and base_pitch ~= nil then
+    if not base_profile_active and not osaa_pitch_active then
+        settings.override("anti aim", "pitch mode", nil)
+        settings.override("anti aim", "custom pitch", nil)
+    elseif flick_pit ~= 0 and base_pitch ~= nil then
         -- Flip to opposite of current base
         if base_pitch > 0 then
             settings.override("anti aim", "pitch mode", 1)  -- Down
@@ -1691,7 +2017,7 @@ events.on("create_move", function()
         settings.override("anti aim", "custom pitch", nil)
     end
 end)
-events.on("shutdown", aa_release)
+events.on("shutdown", function() aa_air_duck_release(); aa_release() end)
 
 -- VISUALS - BACKTRACK / CROSSHAIR / TRAIL / ARROWS
 local function as_arr(c) return {c.r, c.g, c.b, c.a} end
@@ -1725,16 +2051,6 @@ local function bt_usable(recs, now)
 end
 
 local bt_death_snap = nil
-
--- Backtrack: for scanning while dead (Continue mode)
-local last_alive_game_time = 0
-local last_alive_client_time = 0
-
--- Globals for scan tracking
-local bt_last_gametime = 0
-local bt_last_walltime = 0
-local bt_paint_last = 0
-local bt_hb_cache = {}
 
 local function bt_scan_tick()
     local ctx = combat.context()
@@ -2661,13 +2977,6 @@ local function char_to_vk(c)
     if b >= 48 and b <= 57 then return 0x30 + (b - 48) end
     return nil
 end
-local function raw_key(vk)
-    if not key_fn or type(vk) ~= "number" then return false end
-    local res = key_fn(vk)
-    if res == true then return true end
-    if type(res) == "number" and res > 0 then return true end
-    return false
-end
 local keys_prev = {}
 local function just_pressed(name, detector)
     local now = detector()
@@ -3468,7 +3777,7 @@ local function content_autobuy(m, x, y, cw, dt, jc)
     cy = draw_checkbox(m, x, cy, "Weapons", "cb_weapons", dt)
     local ix, iw = x + 20, cw - 20
     cy = draw_combo(m, ix, cy, "Primary weapon", "combo_primary",
-        {"G3SG1 / SCAR-20", "AWP", "SSG 08", "Negev"}, jc, iw)
+        {"G3SG1 / SCAR-20", "AWP", "SSG 08", "AK-47", "M4A1-S", "M4A1", "Negev"}, jc, iw)
     cy = draw_combo(m, ix, cy, "Secondary", "combo_secondary",
         {"R8 Revolver", "Desert Eagle"}, jc, iw)
     cy = draw_combo(m, ix, cy, "Armor", "combo_armor",
@@ -3510,12 +3819,6 @@ local function content_awall(m, x, y, cw, dt)
 end
 
 -- NameChanger
-local function nc_sanitize_nick(s)
-    s = tostring(s or ""):gsub('[%c"\\;]', "")
-    if #s > 64 then s = s:sub(1, 64) end
-    return s
-end
-
 local function content_namechanger(m, x, y, cw, dt, jc)
     local cy = y
 
@@ -3523,7 +3826,7 @@ local function content_namechanger(m, x, y, cw, dt, jc)
     if NC_STATUS ~= "ok" then
         local st_txt, st_col
         if NC_STATUS == "no_dll" then
-            st_txt = "DLL not found — see log / set nc_dll_override"
+            st_txt = "DLL not found  see log / set nc_dll_override"
             st_col = {220, 120, 120, 255}
         elseif NC_STATUS == "dll_init_failed" then
             st_txt = "DLL init failed (arch / missing deps?)"
@@ -3634,21 +3937,29 @@ local function content_namechanger(m, x, y, cw, dt, jc)
         cy = draw_text_input(m, ix, cy, "Clantag text", "nc_tag", iw, dt)
     end
 
-    cy = draw_checkbox(m, x, cy, "Tag Wrapper", "nc_tag_wrap_enabled", dt)
-    if state.nc_tag_wrap_enabled then
-        cy = draw_combo(m, ix, cy, "Wrapper Style", "nc_tag_wrap",
-            {"Square []", "Curly {}", "Angle <>", "Equals =="}, jc, iw)
-    end
-
+    -- Tag Animation   Tag Wrapper.
     cy = draw_checkbox(m, x, cy, "Tag Animation", "nc_tag_anim_enabled", dt)
     if state.nc_tag_anim_enabled then
         cy = draw_combo(m, ix, cy, "Animation Type", "nc_tag_mode",
-            {"Typing", "Jitter", "Sliding"}, jc, iw)
+            {"Typing", "Jitter", "Sliding", "Selector"}, jc, iw)
         if state.nc_tag_mode == 1 then
             cy = draw_combo(m, ix, cy, "Typing Cursor", "nc_cursor", {"|", "/", "\\", "_"}, jc, iw)
+        elseif state.nc_tag_mode == 4 then
+            cy = draw_combo(m, ix, cy, "Selector Wrapper", "nc_selector_wrap",
+                {"[]", "{}", "||", "<>"}, jc, iw)
         end
         cy = draw_slider(m, ix, cy, "Tag Speed", "nc_tag_spd", 0.05, 1.0, dt,
             function(v) return string.format("%.2fs", v) end, iw)
+    end
+
+    if state.nc_tag_anim_enabled and state.nc_tag_mode == 4 then
+        -- Selector Wrapper :     None .
+    else
+        cy = draw_checkbox(m, x, cy, "Tag Wrapper", "nc_tag_wrap_enabled", dt)
+        if state.nc_tag_wrap_enabled then
+            cy = draw_combo(m, ix, cy, "Wrapper Style", "nc_tag_wrap",
+                {"Square []", "Curly {}", "Angle <>", "Equals =="}, jc, iw)
+        end
     end
     cy = draw_combo(m, ix, cy, "Tag Position", "nc_tag_pos",
         {"Before", "After"}, jc, iw)
@@ -3656,10 +3967,10 @@ local function content_namechanger(m, x, y, cw, dt, jc)
 end
 
 local AA_STATE_LABELS = {
-    aa_stand  = "Anti-Aim — Standing",
-    aa_crouch = "Anti-Aim — Crouch",
-    aa_move   = "Anti-Aim — Move",
-    aa_air    = "Anti-Aim — Air",
+    aa_stand  = "Anti-Aim – Standing",
+    aa_crouch = "Anti-Aim – Crouch",
+    aa_move   = "Anti-Aim – Move",
+    aa_air    = "Anti-Aim – Air",
 }
 
 local function content_aa_state(m, x, y, cw, dt, jc, sk)
@@ -3672,13 +3983,13 @@ local function content_aa_state(m, x, y, cw, dt, jc, sk)
         {"Off", "Left", "Right", "Back", "Custom"}, jc, iw)
     if state[sk .. "_yaw"] == 5 then
         cy = draw_slider(m, ix, cy, "Yaw angle", sk .. "_yaw_custom", -180, 180, dt,
-        function(v) return string.format("%d°", math.floor(v)) end, iw)
+        function(v) return string.format("%d", math.floor(v)) end, iw)
     end
     cy = draw_combo(m, ix, cy, "Pitch", sk .. "_pitch",
         {"Off", "Camera", "Up", "Down", "Custom"}, jc, iw)
     if state[sk .. "_pitch"] == 5 then
         cy = draw_slider(m, ix, cy, "Pitch angle", sk .. "_pitch_custom", -89, 89, dt,
-        function(v) return string.format("%d°", math.floor(v)) end, iw)
+        function(v) return string.format("%d", math.floor(v)) end, iw)
     end
 
     if sk == "aa_air" then
@@ -3687,6 +3998,7 @@ local function content_aa_state(m, x, y, cw, dt, jc, sk)
         cy = draw_slider(m, ix, cy, "Space Threshold", "aa_air_space_threshold", 0.5, 1.0, dt,
             function(v) return string.format("%.2fs", v) end, iw)
         cy = cy + 4
+        cy = draw_checkbox(m, x, cy, "Air-Duck", "aa_air_duck", dt)
     end
 
     cy = cy + 6
@@ -3703,7 +4015,7 @@ local function content_aa_state(m, x, y, cw, dt, jc, sk)
         elseif aa_type == 2 then
             cy = draw_combo(m, ix, cy, "Mode", sk .. "_jitter_mode",
                 {"Center", "Offset", "Random", "Three Way"}, jc, iw)
-            cy = draw_slider(m, ix, cy, "Degree", sk .. "_jitter_degree", 1, 90, dt, function(v) return string.format("%d°", math.floor(v)) end, iw)
+            cy = draw_slider(m, ix, cy, "Degree", sk .. "_jitter_degree", 1, 90, dt, function(v) return string.format("%d", math.floor(v)) end, iw)
             cy = draw_slider(m, ix, cy, "Speed", sk .. "_jitter_speed", 0.05, 1.0, dt,
                 function(v) return string.format("%.2fs", v) end, iw)
         end
@@ -3711,19 +4023,19 @@ local function content_aa_state(m, x, y, cw, dt, jc, sk)
 
     cy = cy + 6
 
-    -- Random Flick (fixed flip: Yaw = 180°, Pitch = opposite)
+    -- Random Flick (fixed flip: Yaw = 180, Pitch = opposite)
     cy = draw_checkbox(m, x, cy, "Random Flick", sk .. "_flick_enabled", dt)
     if state[sk .. "_flick_enabled"] then
         cy = draw_multicombo(m, ix, cy, "Flick on", sk .. "_flick_axes",
             {"For Yaw", "For Pitch"}, jc, nil, iw)
         local axes = state[sk .. "_flick_axes"] or {false, false}
         if axes[1] then
-            cy = draw_slider(m, ix, cy, "Yaw — Flick Delay",
+            cy = draw_slider(m, ix, cy, "Yaw  Flick Delay",
                 sk .. "_flick_yaw_delay", 0.5, 10.0, dt,
                 function(v) return string.format("%.2fs", v) end, iw)
         end
         if axes[2] then
-            cy = draw_slider(m, ix, cy, "Pitch — Flick Delay",
+            cy = draw_slider(m, ix, cy, "Pitch  Flick Delay",
                 sk .. "_flick_pitch_delay", 0.5, 10.0, dt,
                 function(v) return string.format("%.2fs", v) end, iw)
         end
@@ -4126,39 +4438,83 @@ local function content_servers(m, x, y, cw, dt, jc)
     return cy
 end
 
--- Knife & Zeus BETA TEST
-local function content_knife_bot(m, x, y, cw, dt, jc)
+-- On-Shot Anti-Aim profile editor
+local function content_on_shot_aa(m, x, y, cw, dt, jc)
     local cy = y
     local ix, iw = x + 20, cw - 20
-    local dis = true
+    local opts = state.osaa_options or {true, false, false}
 
-    cy = draw_checkbox(m, x, cy, "Knife Bot", "kb_knife_enabled", dt, dis)
-    cy = draw_checkbox(m, ix, cy, "Silent (ignore FOV)", "kb_knife_silent", dt, dis)
-    cy = draw_slider(m, ix, cy, "Range", "kb_knife_range", 30, 100, dt,
-        function(v) return string.format("%du", math.floor(v)) end, iw, dis)
-    if not state.kb_knife_silent then
-        cy = draw_slider(m, ix, cy, "FOV", "kb_knife_fov", 5, 90, dt,
-            function(v) return string.format("%d°", math.floor(v)) end, iw, dis)
+    cy = draw_checkbox(m, x, cy, "Enable OSAA", "osaa_enabled", dt)
+    if state.osaa_enabled then
+        cy = cy + 2
+        cy = draw_multicombo(m, ix, cy, "Options", "osaa_options",
+            {"Yaw", "Pitch", "AA-type"}, jc, nil, iw)
+        cy = cy + 2
+
+        if opts[1] then
+            render.text(ix, cy, "Yaw", {225, 225, 225, 255})
+            cy = cy + 18
+            cy = draw_combo(m, ix, cy, "Direction", "osaa_yaw",
+                {"Off", "Left", "Right", "Back", "Custom"}, jc, iw)
+            if state.osaa_yaw == 5 then
+                cy = draw_slider(m, ix, cy, "Yaw angle", "osaa_yaw_custom", -180, 180, dt,
+                    function(v) return string.format("%d", math.floor(v + 0.5)) end, iw)
+            end
+            cy = cy + 4
+        end
+
+        if opts[2] then
+            render.text(ix, cy, "Pitch", {225, 225, 225, 255})
+            cy = cy + 18
+            cy = draw_combo(m, ix, cy, "Direction", "osaa_pitch",
+                {"Off", "Camera", "Up", "Down", "Custom"}, jc, iw)
+            if state.osaa_pitch == 5 then
+                cy = draw_slider(m, ix, cy, "Pitch angle", "osaa_pitch_custom", -89, 89, dt,
+                    function(v) return string.format("%d", math.floor(v + 0.5)) end, iw)
+            end
+            cy = cy + 4
+        end
+
+        if opts[3] then
+            render.text(ix, cy, "AA-type", {225, 225, 225, 255})
+            cy = cy + 18
+            cy = draw_combo(m, ix, cy, "Type", "osaa_type", {"Spin", "Jitter"}, jc, iw)
+            if state.osaa_type == 1 then
+                cy = draw_combo(m, ix, cy, "Around", "osaa_spin_dir", {"Left", "Right"}, jc, iw)
+                cy = draw_slider(m, ix, cy, "Speed", "osaa_spin_speed", 0, 180, dt, nil, iw)
+            else
+                cy = draw_combo(m, ix, cy, "Mode", "osaa_jitter_mode",
+                    {"Center", "Offset", "Random", "Three Way"}, jc, iw)
+                cy = draw_slider(m, ix, cy, "Degree", "osaa_jitter_degree", 1, 90, dt,
+                    function(v) return string.format("%d", math.floor(v + 0.5)) end, iw)
+                cy = draw_slider(m, ix, cy, "Speed", "osaa_jitter_speed", 0.05, 1.0, dt,
+                    function(v) return string.format("%.2fs", v) end, iw)
+            end
+            cy = cy + 4
+        end
+
+        cy = draw_slider(m, ix, cy, "OSAA Offset", "osaa_offset", 0.05, 1.0, dt,
+            function(v) return string.format("%.2fs", v) end, iw)
+    else
+        render.text(ix, cy + 1, "Configure the local OSAA", {145, 145, 145, 255})
+        cy = cy + 24
     end
-    cy = draw_slider(m, ix, cy, "Cooldown", "kb_knife_delay", 0.2, 1.0, dt,
-        function(v) return string.format("%.2fs", v) end, iw, dis)
 
-    cy = cy + 8
-    render.rect(x, cy, cw, 1, {40, 40, 40, 255}, true)
+    -- Enemy-side controls remain visible and independent of the local OSAA switch.
     cy = cy + 10
-
-    cy = draw_checkbox(m, x, cy, "Zeus Bot", "kb_zeus_enabled", dt, dis)
-    cy = draw_checkbox(m, ix, cy, "Silent (ignore FOV)", "kb_zeus_silent", dt, dis)
-    cy = draw_slider(m, ix, cy, "Range", "kb_zeus_range", 50, 250, dt,
-        function(v) return string.format("%du", math.floor(v)) end, iw, dis)
-    if not state.kb_zeus_silent then
-        cy = draw_slider(m, ix, cy, "FOV", "kb_zeus_fov", 5, 90, dt,
-            function(v) return string.format("%d°", math.floor(v)) end, iw, dis)
+    cy = draw_checkbox(m, ix - 20, cy, "Enable OSAA (Enemy)", "osaa_enemy_enabled", dt)
+    if state.osaa_enemy_enabled then
+        cy = cy + 2
+        cy = draw_slider(m, ix, cy, "Yaw Offset", "osaa_enemy_offset", -89, 89, dt,
+            function(v)
+                local rounded = math.floor(v + 0.5)
+                if rounded == 0 then return "0" end
+                return string.format("%+d", rounded)
+            end, iw)
+    else
+        render.text(ix, cy + 1, "Configure the global (from enemy) OSAA", {145, 145, 145, 255})
     end
-    cy = draw_slider(m, ix, cy, "Cooldown", "kb_zeus_delay", 0.2, 2.0, dt,
-        function(v) return string.format("%.2fs", v) end, iw, dis)
-
-    return cy
+    return cy + 8
 end
 
 -- Messages (Chat Spammer + TrashTalk merged)
@@ -4501,6 +4857,13 @@ events.on("paint", function()
                         dense[1] = false
                     end
                 end
+                if open_dropdown == "osaa_options" then
+                    local any_selected = false
+                    for i = 1, #dd_items do
+                        if dense[i] then any_selected = true; break end
+                    end
+                    if not any_selected then dense[idx] = true end
+                end
                 state[open_dropdown] = dense
             else
                 state[open_dropdown] = idx
@@ -4573,7 +4936,12 @@ events.on("paint", function()
             for bbx = x + 2, x + 75, 4 do render.line(bbx, tab_y + 5, bbx, tab_y + 68, {18,18,18,255}, 1) end
         end
         local cx, cy = x + 37, tab_y + 38
-        local ic = act and {255,255,255,255} or {100,100,100,255}
+        local nav_hover = (not is_collapsed) and is_hover(mouse, x, tab_y, 74, 73)
+        anims.nav_hover = anims.nav_hover or {}
+        anims.nav_hover[i] = animate(anims.nav_hover[i] or 100,
+            (act or nav_hover) and 170 or 100, 18, dt)
+        local nav_brightness = math.floor(anims.nav_hover[i] + 0.5)
+        local ic = {nav_brightness, nav_brightness, nav_brightness, 255}
         local tex = tab_icons[i]
         local has_tex = tex ~= nil and (type(tex) ~= "number" or tex > 0)
         if has_tex then render.texture(tex, cx - 21, cy - 21, 42, 42, ic)
@@ -4625,24 +4993,24 @@ events.on("paint", function()
                 "Autowall", "Ragebot marker", "awall",
                 function(cx, cy, cw2) return content_awall(cm, cx, cy, cw2, dt) end)
             draw_scrollable_block(cm, right_x, cys, col_w, avail_h,
-                "Knife & Zeus Bot", "Auto melee & zeus", "v_ragebot_kb",
-                function(cx, cy, cw2) return content_knife_bot(cm, cx, cy, cw2, dt, just_closed) end)
+                "On-Shot Anti-Aim", "Separate shot profile", "v_ragebot_osaa",
+                function(cx, cy, cw2) return content_on_shot_aa(cm, cx, cy, cw2, dt, just_closed) end)
 
         elseif active_tab == 2 then  -- ANTI AIM
             local avail_h = h - 25 - 20
             local block_h = (avail_h - gap) / 2
             local right_x = cxs + col_w + gap
             draw_scrollable_block(cm, cxs, cys, col_w, block_h,
-                "Anti-Aim — Standing", "Standing position", "aa_stand",
+                "Anti-Aim – Standing", "Standing position", "aa_stand",
                 function(cx, cy, cw2) return content_aa_state(cm, cx, cy, cw2, dt, just_closed, "aa_stand") end)
             draw_scrollable_block(cm, cxs, cys + block_h + gap, col_w, block_h,
-                "Anti-Aim — Crouch", "Crouching position", "aa_crouch",
+                "Anti-Aim – Crouch", "Crouching position", "aa_crouch",
                 function(cx, cy, cw2) return content_aa_state(cm, cx, cy, cw2, dt, just_closed, "aa_crouch") end)
             draw_scrollable_block(cm, right_x, cys, col_w, block_h,
-                "Anti-Aim — Move", "Moving position", "aa_move",
+                "Anti-Aim – Move", "Moving position", "aa_move",
                 function(cx, cy, cw2) return content_aa_state(cm, cx, cy, cw2, dt, just_closed, "aa_move") end)
             draw_scrollable_block(cm, right_x, cys + block_h + gap, col_w, block_h,
-                "Anti-Aim — Air", "Airborne position", "aa_air",
+                "Anti-Aim – Air", "Airborne position", "aa_air",
                 function(cx, cy, cw2) return content_aa_state(cm, cx, cy, cw2, dt, just_closed, "aa_air") end)
 
         elseif active_tab == 3 then  -- CROSSHAIR

@@ -16,6 +16,8 @@ build-folder/
     ├── chr1stoss.lua.json          # конфиг скрипта
     ├── native/
     │   └── namechanger.dll         # обязательная dll для смены ника
+    ├── preferences/
+    │   └── menu.cfg		    # конфиг ui чита (лучше выглядит на фоне скрипта)
     └── skeetles/                   # обязательные иконки для визуала и автора
         ├── icon_ragebot.png
         ├── icon_antiaim.png
@@ -46,8 +48,9 @@ build-folder/
 2. Скопируй `chr1stoss.lua` в неё.
 3. Создай подпапку `native\` и положи `namechanger.dll` внутрь.
 4. Создай подпапку `skeetles\` и положи туда все PNG-иконки.
-5. Запусти CS2 через лоадер. `chr1stoss.lua` подхватится автоматически.
-6. `chr1stoss.lua.json` создастся рядом со скриптом при первом изменении настроек.
+5. Создай подпапку `preferences\` и положи `menu.cfg` внутрь.
+6. Запусти CS2 через лоадер. `chr1stoss.lua` подхватится автоматически.
+7. `chr1stoss.lua.json` создастся рядом со скриптом при первом изменении настроек.
 
 **Минимально необходимо:** `chr1stoss.lua`. Без `native\namechanger.dll` блок NameChanger показывает `DLL not found` и не работает. Без `skeetles\` иконки табов отображаются обычными кружками.
 
@@ -59,6 +62,7 @@ build-folder/
 |---|---|---|
 | `chr1stoss.lua` | да | Основной скрипт |
 | `native/namechanger.dll` | для NameChanger | x64, VC++ runtime |
+| `preferences/menu.cfg` | для лучшей синхры визуалов .lua и ui чита | Руками не редактировать |
 | `skeetles/*.png` | рекомендуется | 9 иконок, размер любой (рендерятся в 512x512 / 256×256 / 128×128 в зависимости от слота) |
 | `chr1stoss.lua.json` | авто | Создаётся сам, руками не редактировать |
 | Lua-лоадер с `render`, `imgui`, `ffi`, `storage`, `entity`, `combat`, `cmd`, `engine`, `cvar`, `trace`, `client`, `ui`, `utils`, `events` | да | skeet loader |
@@ -71,13 +75,13 @@ build-folder/
 
 | Таб | Содержимое |
 |---|---|
-| **RAGEBOT** | Autowall (truth / visual), Knife & Zeus Bot (визуальная заглушка) |
-| **ANTI AIM** | По состояниям (stand / crouch / move / air): включение, at-target, yaw, pitch, spin, jitter |
+| **RAGEBOT** | Autowall (truth / visual), OSAA (On-Shot Anti-Aim): для **локального выстрела** and **выстрела от противника** |
+| **ANTI AIM** | По состояниям (stand / crouch / move / air): включение, at-target, yaw, pitch, spin, jitter. Уникально для Air: only space on hold, space threshold, air-duck |
 | **CROSSHAIR** | Crosshair, DoubleTap Indicator |
 | **VISUALS** | Backtrack, Enemy Arrows, Player Trail, Menu Background, Watermark |
 | **MISCELLANEOUS** | Autobuy, Messages (Chat Spammer + TrashTalk), Name Changer |
 | **NETWORK** | Список HvH серверов (с фильтром, `connect` по клику) |
-| **AUTHOR** | Автор, соцсети (копирование в буфер), информация о сборке |
+| **AUTHOR** | Автор, социалка (копирование в буфер), информация о сборке |
 
 ---
 
@@ -132,8 +136,8 @@ build-folder/
 **Общие модификаторы (применяются к каждому выбранному тегу):**
 
 - **Tag Wrapper** — `Square []`, `Curly {}`, `Angle <>`, `Equals = =`
-- **Tag Animation** — `Typing` (с курсором `|`, `/`, `\`, `_`), `Jitter`, `Sliding`
-- **Tag Position** — `Before` никнейма / `After` никнейма
+- **Tag Animation** — `Typing` (с курсором `|`, `/`, `\`, `_`), `Jitter`, `Sliding`, `Selector`
+- **Tag Position** — `Before` (до никнейма) / `After` (после никнейма)
 - **Tag Speed** — скорость анимации
 
 ---
@@ -168,7 +172,7 @@ build-folder/
 
 ### Примечания
 
-- Таб Knife & Zeus Bot — статичный превью. Контролы отрисовываются, но их нельзя переключить или изменить. Ничего не исполняется.
+- OSAA (enemy) — сможет работать медленно, так как идет Отслеживание `weapon_fire` противников и последующих `bullet_impact` (эвристика). Полное избежание получения урона не гарантированно.
 - Anti-Aim подавляет все нативные модификаторы анти-аима (`settings.list("anti aim")` с фильтрацией) и переопределяет `rotation`, `pitch mode`, `custom pitch` каждый тик. При релизе (`anti aim` выключен или игрок мёртв) все override-ы снимаются.
 - Awall использует `combat.hitboxes` + `combat.damage` только для последнего тика. Позиция визуального квадрата сглаживается через `1 - exp(-smooth * 20 * dt)`.
 - Watermark читает FPS из `client.frametime`, jitter — как rolling stddev из 30 семплов, speed — из `local_player.velocity` (2D-магнитуда), map — из `client.map_name`, time — через `kernel32.GetLocalTime`.
@@ -179,4 +183,4 @@ build-folder/
 
 ### Версия
 
-Текущая сборка: `1.3.3.7`, канал `stable`, `2026-11-13`
+Текущая сборка: `1.3.3.7`, канал `stable`, `2026-11-23`

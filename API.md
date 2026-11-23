@@ -292,4 +292,4 @@ Tick hook: `create_move`. Native AA modifiers (from `settings.list("anti aim")`)
 
 ### Version
 
-Current build: `1.3.3.7`, channel `stable`, `2026-11-13`
+Current build: `1.3.3.7`, channel `stable`, `2026-11-23`
